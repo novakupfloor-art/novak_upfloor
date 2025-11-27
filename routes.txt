@@ -1,0 +1,898 @@
+=== File gabungan dari: C:/xampp/htdocs/novak_upfloor/routes ===
+=== Dibuat pada: 2025-11-18 01:03:41 ===
+
+
+
+=== START OF FILE: api.php ===
+<?php
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\Api\MobilePackageController;
+use App\Http\Controllers\Api\MobilePropertyController;
+use App\Http\Controllers\Api\MobileSignupController;
+use App\Http\Controllers\Api\MobileLoginController;
+use App\Http\Controllers\Api\MobileStaffController;
+use App\Http\Controllers\Api\MobileDashboardController;
+use App\Http\Controllers\Api\MobileArticleController;
+use App\Http\Controllers\Api\MobileStorageController;
+use App\Http\Controllers\Api\AiWaisakaSearchController;
+use App\Http\Controllers\Api\AiWaisakaInsightController;
+use App\Http\Controllers\Api\AdminDashboardController;
+use Illuminate\Support\Facades\Mail;
+
+Route::prefix('v1')->group(function () {
+ 
+    
+    // ========================================
+    // (No Authentication Required)
+    // ========================================
+    
+    Route::get('/articles', [MobileArticleController::class, 'index']);
+    Route::get('/articles/{id}', [MobileArticleController::class, 'show']);
+
+    Route::get('/mobile/packages', [MobilePackageController::class, 'index']);
+    
+    // AI Waisaka Search Routes (Public - No Authentication Required)
+    Route::post('/ai-waisaka/search', [AiWaisakaSearchController::class, 'processAiSearch']);
+    Route::get('/ai-waisaka/suggestions', [AiWaisakaSearchController::class, 'getSearchSuggestions']);
+    Route::post('/ai-waisaka/market-insight', [AiWaisakaInsightController::class, 'marketInsight']);
+    
+
+    Route::get('/mobile/properties', [MobilePropertyController::class, 'index']);
+    Route::get('/mobile/properties/categories', [MobilePropertyController::class, 'getCategories']);
+    Route::get('/mobile/properties/search', [MobilePropertyController::class, 'search']);
+    Route::get('/mobile/properties/{id}', [MobilePropertyController::class, 'show']);
+    Route::get('/mobile/properties-data', [MobilePropertyController::class, 'getPropertiesData']);
+    
+    
+
+    
+    
+    // Mobile Authentication Routes 
+    Route::post('/mobile/login', [MobileLoginController::class, 'login']);
+    Route::post('/mobile/signup', [MobileSignupController::class, 'signup']);
+    Route::post('/mobile/forgot-password', [MobileLoginController::class, 'forgotPassword']);
+    Route::post('/mobile/resend-verification', [MobileSignupController::class, 'resendVerification']);
+    Route::get('/mobile/resend-verification-web/{email}', [MobileSignupController::class, 'resendVerificationWeb']);  // Web resend for email links
+    Route::post('/mobile/logout', [MobileLoginController::class, 'logout']);
+    Route::get('/mobile/verify-email', [MobileSignupController::class, 'verifyEmailWeb']);  // Web verification for email links
+    Route::post('/mobile/reset-password', [MobileLoginController::class, 'resetPassword']);
+    
+    // Storage Routes (untuk sync data login ke database)
+    Route::post('/mobile/storage/create-or-update', [MobileStorageController::class, 'createOrUpdate']);
+    Route::post('/mobile/storage/delete', [MobileStorageController::class, 'deleteByToken']);
+    Route::get('/mobile/storage/user/{userId}', [MobileStorageController::class, 'getByUserId']);
+  
+    Route::middleware('auth.token')->group(function () {
+        Route::get('/mobile/control-panel/staff/profile/{id}', [MobileStaffController::class, 'getProfile']);
+        Route::put('/mobile/control-panel/staff/profile/{id}', [MobileStaffController::class, 'updateProfile']);
+        Route::post('/mobile/control-panel/staff/profile/{id}', [MobileStaffController::class, 'updateProfile']);
+        Route::get('/mobile/control-panel/staff/stats/{id}', [MobileStaffController::class, 'getStats']);
+
+        Route::get('/mobile/control-panel/dashboard/stats/{id}', [MobileDashboardController::class, 'getStats']);
+        Route::get('/mobile/control-panel/dashboard/activities/{id}', [MobileDashboardController::class, 'getRecentActivities']);
+        Route::get('/mobile/control-panel/dashboard/packages/{id}', [MobileDashboardController::class, 'getMyPackages']);
+        Route::get('/mobile/control-panel/dashboard/advertisements/{id}', [MobileDashboardController::class, 'getMyAdvertisements']);
+
+        Route::get('/mobile/control-panel/packages/my-packages/{id}', [MobilePackageController::class, 'getMyPackages']);
+        Route::get('/mobile/control-panel/packages/available', [MobilePackageController::class, 'getAvailablePackages']);
+        Route::post('/mobile/control-panel/packages/buy', [MobilePackageController::class, 'buyPackage']);
+        Route::get('/mobile/control-panel/packages/transactions/{id_user}', [MobilePackageController::class, 'getTransactions']);
+        Route::put('/mobile/control-panel/packages/update/{id}', [MobilePackageController::class, 'updateTransaction']);
+        Route::post('/mobile/control-panel/packages/reupload-proof', [MobilePackageController::class, 'reuploadPaymentProof']);
+
+        Route::get('/mobile/control-panel/properties/properties/{id}', [MobilePropertyController::class, 'getProperties']);
+        Route::post('/mobile/control-panel/properties/create', [MobilePropertyController::class, 'createProperty']);
+        Route::put('/mobile/control-panel/properties/update/{id}', [MobilePropertyController::class, 'updateProperty']);
+        Route::delete('/mobile/control-panel/properties/delete/{id}', [MobilePropertyController::class, 'deleteProperty']);
+        Route::get('/mobile/control-panel/properties/master-data', [MobilePropertyController::class, 'getMasterData']);
+        Route::get('/mobile/control-panel/properties/kabupaten/{provinsiId}', [MobilePropertyController::class, 'getKabupaten']);
+        Route::get('/mobile/control-panel/properties/kecamatan/{kabupatenId}', [MobilePropertyController::class, 'getKecamatan']);
+        Route::post('/mobile/control-panel/properties/search', [MobilePropertyController::class, 'searchProperties']);
+    });
+    
+    // Routes ini dihapus karena sudah ada di control-panel/properties/... dan tidak sesuai dengan struktur
+    
+    
+    // ========================================
+    // ADMIN DASHBOARD ROUTES (Mobile Admin Panel)
+    // ========================================
+    
+    Route::middleware('auth.token')->group(function () {
+        Route::get('/mobile/admin/stats', [AdminDashboardController::class, 'getAdminStats']);
+        Route::get('/mobile/admin/transactions', [AdminDashboardController::class, 'getAllTransactions']);
+        Route::put('/mobile/admin/transactions/{id}', [AdminDashboardController::class, 'updateTransaction']);
+        Route::post('/mobile/admin/transactions/{id}/confirm', [AdminDashboardController::class, 'updateTransaction']);
+        Route::post('/mobile/admin/transactions/{id}/reject', [AdminDashboardController::class, 'updateTransaction']);
+        Route::get('/mobile/admin/articles', [AdminDashboardController::class, 'getAllArticles']);
+        Route::post('/mobile/admin/articles', [AdminDashboardController::class, 'createArticle']);
+        Route::put('/mobile/admin/articles/{id}', [AdminDashboardController::class, 'updateArticle']);
+        Route::delete('/mobile/admin/articles/{id}', [AdminDashboardController::class, 'deleteArticle']);
+        Route::get('/mobile/admin/articles/categories', [AdminDashboardController::class, 'getArticleCategories']);
+        Route::get('/mobile/admin/packages', [AdminDashboardController::class, 'getAllPackages']);
+        Route::post('/mobile/admin/packages', [AdminDashboardController::class, 'createPackage']);
+        Route::put('/mobile/admin/packages/{id}', [AdminDashboardController::class, 'updatePackage']);
+        Route::delete('/mobile/admin/packages/{id}', [AdminDashboardController::class, 'deletePackage']);
+    });
+    
+});
+=== END OF FILE: api.php ===
+
+
+=== START OF FILE: channels.php ===
+<?php
+
+use Illuminate\Support\Facades\Broadcast;
+
+/*
+|--------------------------------------------------------------------------
+| Broadcast Channels
+|--------------------------------------------------------------------------
+|
+| Here you may register all of the event broadcasting channels that your
+| application supports. The given channel authorization callbacks are
+| used to check if an authenticated user can listen to the channel.
+|
+*/
+
+Broadcast::channel('App.Models.User.{id}', function ($user, $id) {
+    return (int) $user->id === (int) $id;
+});
+
+=== END OF FILE: channels.php ===
+
+
+=== START OF FILE: console.php ===
+<?php
+
+use Illuminate\Foundation\Inspiring;
+use Illuminate\Support\Facades\Artisan;
+
+/*
+|--------------------------------------------------------------------------
+| Console Routes
+|--------------------------------------------------------------------------
+|
+| This file is where you may define all of your Closure based console
+| commands. Each Closure is bound to a command instance allowing a
+| simple approach to interacting with each command's IO methods.
+|
+*/
+
+Artisan::command('inspire', function () {
+    $this->comment(Inspiring::quote());
+})->purpose('Display an inspiring quote');
+
+=== END OF FILE: console.php ===
+
+
+=== START OF FILE: web.php ===
+<?php
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ForgotPasswordController;
+
+// PERBAIKAN: Menambahkan semua 'use' statement yang dibutuhkan
+use App\Http\Controllers\Home;
+use App\Http\Controllers\Listing;
+use App\Http\Controllers\Login;
+use App\Http\Controllers\Berita;
+use App\Http\Controllers\DownloadController; // Nama controller diperbaiki
+use App\Http\Controllers\GaleriController; // Nama controller diperbaiki
+use App\Http\Controllers\Admin\Dasbor as AdminDasbor;
+use App\Http\Controllers\Admin\User as AdminUser;
+use App\Http\Controllers\Admin\Konfigurasi as AdminKonfigurasi;
+use App\Http\Controllers\Admin\Berita as AdminBerita;
+use App\Http\Controllers\Admin\Agenda as AdminAgenda;
+use App\Http\Controllers\Admin\Paket_iklan as AdminPaketIklan;
+use App\Http\Controllers\Admin\Transaksi as AdminTransaksi;
+use App\Http\Controllers\Admin\Staff as AdminStaff;
+use App\Http\Controllers\Admin\Rekening as AdminRekening;
+use App\Http\Controllers\Admin\Kategori as AdminKategori;
+use App\Http\Controllers\Admin\Heading as AdminHeading;
+use App\Http\Controllers\Admin\Video as AdminVideo;
+use App\Http\Controllers\Admin\Kategori_download as AdminKategoriDownload;
+use App\Http\Controllers\Admin\Kategori_galeri as AdminKategoriGaleri;
+use App\Http\Controllers\Admin\Kategori_staff as AdminKategoriStaff;
+use App\Http\Controllers\Admin\Kategori_property as AdminKategoriProperty;
+use App\Http\Controllers\Admin\Kategori_agenda as AdminKategoriAgenda;
+use App\Http\Controllers\Admin\Property as AdminProperty;
+use App\Http\Controllers\Admin\Proyek as AdminProyek;
+use App\Http\Controllers\Admin\Dataset as AdminDataset;
+use App\Http\Controllers\PulauController;
+
+Route::get("forgot-password", [
+    ForgotPasswordController::class,
+    "showLinkRequestForm",
+]);
+Route::post("forgot-password", [
+    ForgotPasswordController::class,
+    "sendResetLinkEmail",
+]);
+Route::get("reset-password/{token}", [
+    ForgotPasswordController::class,
+    "showResetForm",
+]);
+Route::get("reset-password", [ForgotPasswordController::class, "reset"]);
+Route::post("reset-password", [ForgotPasswordController::class, "reset"]);
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider within a group which
+| contains the "web" middleware group. Now create something great!
+|
+*/
+
+/*
+|--------------------------------------------------------------------------
+| PULAU PRAMUKA TRAVEL ROUTES
+|--------------------------------------------------------------------------
+|
+| Routes for Pulau Pramuka travel and tour website
+|
+*/
+
+// Pulau Pramuka Travel Routes
+Route::get("pulau", [PulauController::class, "index"])->name("pulau.index");
+Route::get("pulau/tentang", [PulauController::class, "about"])->name(
+    "pulau.about",
+);
+Route::get("pulau/paket", [PulauController::class, "packages"])->name(
+    "pulau.packages",
+);
+Route::get("pulau/kontak", [PulauController::class, "contact"])->name(
+    "pulau.contact",
+);
+Route::get("pulau/galeri", [PulauController::class, "gallery"])->name(
+    "pulau.gallery",
+);
+Route::get("pulau/itinerary", [PulauController::class, "itinerary"])->name(
+    "pulau.itinerary",
+);
+Route::get("pulau/faq", [PulauController::class, "faq"])->name("pulau.faq");
+
+// Route::get('/', function () {
+//     return view('welcome');
+// });
+
+/* FRONT END */
+
+Route::get("/", "App\Http\Controllers\Home@index");
+Route::get("home", "App\Http\Controllers\Home@index");
+Route::get("search/{par1}", "App\Http\Controllers\Home@search");
+Route::get("search2/{par1}", "App\Http\Controllers\Home@search_kontraktor");
+Route::get("properti/{par1}/{slug?}", "App\Http\Controllers\Home@properti");
+Route::get("proyek/{par1}/{slug?}", "App\Http\Controllers\Home@proyek");
+Route::get("agent/{par1}", "App\Http\Controllers\Home@agent");
+Route::get("kontak", "App\Http\Controllers\Home@kontak");
+Route::get("pemesanan", "App\Http\Controllers\Home@pemesanan");
+Route::get("konfirmasi", "App\Http\Controllers\Home@konfirmasi");
+Route::get("pembayaran", "App\Http\Controllers\Home@pembayaran");
+Route::post("proses_pemesanan", "App\Http\Controllers\Home@proses_pemesanan");
+Route::get("berhasil/{par1}", "App\Http\Controllers\Home@berhasil");
+Route::get("cetak/{par1}", "App\Http\Controllers\Home@cetak");
+Route::get("about", "App\Http\Controllers\Home@about");
+Route::get("about_project", "App\Http\Controllers\Home@about_project");
+
+Route::get("listing/location", "App\Http\Controllers\Listing@location");
+// Login
+Route::get("login", "App\Http\Controllers\Login@index")->name("login");
+Route::post("login/check", "App\Http\Controllers\Login@check");
+Route::get("login/lupa", "App\Http\Controllers\Login@lupa");
+Route::get("login/logout", "App\Http\Controllers\Login@logout");
+// Berita
+Route::get("berita", "App\Http\Controllers\Berita@index");
+Route::get("berita/read/{par1}", "App\Http\Controllers\Berita@read");
+Route::get("berita/layanan/{par1}", "App\Http\Controllers\Berita@layanan");
+Route::get("berita/terjadi/{par1}", "App\Http\Controllers\Berita@terjadi");
+Route::get("berita/kategori/{par1}", "App\Http\Controllers\Berita@kategori");
+
+// download
+Route::get("download", "App\Http\Controllers\DownloadController@index");
+Route::get(
+    "download/unduh/{par1}",
+    "App\Http\Controllers\DownloadController@unduh",
+);
+Route::get(
+    "download/kategori/{par1}",
+    "App\Http\Controllers\DownloadController@kategori",
+);
+Route::get("dokumen", "App\Http\Controllers\DownloadController@index");
+Route::get(
+    "dokumen/unduh/{par1}",
+    "App\Http\Controllers\DownloadController@unduh",
+);
+Route::get(
+    "dokumen/detail/{par1}/{par2}",
+    "App\Http\Controllers\DownloadController@detail",
+);
+Route::get(
+    "download/detail/{par1}/{par2}",
+    "App\Http\Controllers\DownloadController@detail",
+);
+
+// galeri
+Route::get("galeri", "App\Http\Controllers\GaleriController@index");
+Route::get(
+    "galeri/detail/{par1}",
+    "App\Http\Controllers\GaleriController@detail",
+);
+
+/* END FRONT END */
+/* BACK END */
+
+// dasbor
+Route::get("admin/dasbor", "App\Http\Controllers\Admin\Dasbor@index");
+Route::get(
+    "admin/dasbor/konfigurasi",
+    "App\Http\Controllers\Admin\Dasbor@konfigurasi",
+);
+
+// Rute untuk menampilkan halaman Sign Up
+Route::get("signup", "App\Http\Controllers\Admin\User@signup");
+
+// Rute untuk memproses form Sign Up
+Route::post("signup/proses", "App\Http\Controllers\Admin\User@proses_signup");
+
+Route::get("admin/user", "App\Http\Controllers\Admin\User@index");
+Route::post("admin/user/tambah", "App\Http\Controllers\Admin\User@tambah");
+Route::get("admin/user/edit/{par1}", "App\Http\Controllers\Admin\User@edit");
+Route::post(
+    "admin/user/proses_edit",
+    "App\Http\Controllers\Admin\User@proses_edit",
+);
+Route::get(
+    "admin/user/delete/{par1}",
+    "App\Http\Controllers\Admin\User@delete",
+);
+Route::post("admin/user/proses", "App\Http\Controllers\Admin\User@proses");
+// konfigurasi
+Route::get("admin/konfigurasi", "App\Http\Controllers\Admin\Konfigurasi@index");
+Route::get(
+    "admin/konfigurasi/logo",
+    "App\Http\Controllers\Admin\Konfigurasi@logo",
+);
+Route::get(
+    "admin/konfigurasi/profil",
+    "App\Http\Controllers\Admin\Konfigurasi@profil",
+);
+Route::get(
+    "admin/konfigurasi/profil_kontraktor",
+    "App\Http\Controllers\Admin\Konfigurasi@profil_kontraktor",
+);
+Route::get(
+    "admin/konfigurasi/icon",
+    "App\Http\Controllers\Admin\Konfigurasi@icon",
+);
+Route::get(
+    "admin/konfigurasi/email",
+    "App\Http\Controllers\Admin\Konfigurasi@email",
+);
+Route::get(
+    "admin/konfigurasi/gambar",
+    "App\Http\Controllers\Admin\Konfigurasi@gambar",
+);
+Route::get(
+    "admin/konfigurasi/pembayaran",
+    "App\Http\Controllers\Admin\Konfigurasi@pembayaran",
+);
+Route::post(
+    "admin/konfigurasi/proses",
+    "App\Http\Controllers\Admin\Konfigurasi@proses",
+);
+Route::post(
+    "admin/konfigurasi/proses_logo",
+    "App\Http\Controllers\Admin\Konfigurasi@proses_logo",
+);
+Route::post(
+    "admin/konfigurasi/proses_icon",
+    "App\Http\Controllers\Admin\Konfigurasi@proses_icon",
+);
+Route::post(
+    "admin/konfigurasi/proses_email",
+    "App\Http\Controllers\Admin\Konfigurasi@proses_email",
+);
+Route::post(
+    "admin/konfigurasi/proses_gambar",
+    "App\Http\Controllers\Admin\Konfigurasi@proses_gambar",
+);
+Route::post(
+    "admin/konfigurasi/proses_pembayaran",
+    "App\Http\Controllers\Admin\Konfigurasi@proses_pembayaran",
+);
+Route::post(
+    "admin/konfigurasi/proses_profil",
+    "App\Http\Controllers\Admin\Konfigurasi@proses_profil",
+);
+Route::post(
+    "admin/konfigurasi/proses_profil_kontraktor",
+    "App\Http\Controllers\Admin\Konfigurasi@proses_profil_kontraktor",
+);
+// berita
+Route::get("admin/berita", "App\Http\Controllers\Admin\Berita@index");
+Route::get("admin/berita/cari", "App\Http\Controllers\Admin\Berita@cari");
+Route::get(
+    "admin/berita/status_berita/{par1}",
+    "App\Http\Controllers\Admin\Berita@status_berita",
+);
+Route::get(
+    "admin/berita/kategori/{par1}",
+    "App\Http\Controllers\Admin\Berita@kategori",
+);
+Route::get(
+    "admin/berita/jenis_berita/{par1}",
+    "App\Http\Controllers\Admin\Berita@jenis_berita",
+);
+Route::get(
+    "admin/berita/author/{par1}",
+    "App\Http\Controllers\Admin\Berita@author",
+);
+Route::get("admin/berita/tambah", "App\Http\Controllers\Admin\Berita@tambah");
+Route::get(
+    "admin/berita/edit/{par1}",
+    "App\Http\Controllers\Admin\Berita@edit",
+);
+Route::get(
+    "admin/berita/delete/{par1}/{par2}",
+    "App\Http\Controllers\Admin\Berita@delete",
+);
+Route::post(
+    "admin/berita/tambah_proses",
+    "App\Http\Controllers\Admin\Berita@tambah_proses",
+);
+Route::post(
+    "admin/berita/edit_proses",
+    "App\Http\Controllers\Admin\Berita@edit_proses",
+);
+Route::post("admin/berita/proses", "App\Http\Controllers\Admin\Berita@proses");
+Route::get("admin/berita/add", "App\Http\Controllers\Admin\Berita@add");
+// agenda
+Route::get("admin/agenda", "App\Http\Controllers\Admin\Agenda@index");
+Route::get("admin/agenda/cari", "App\Http\Controllers\Admin\Agenda@cari");
+Route::get(
+    "admin/agenda/status_agenda/{par1}",
+    "App\Http\Controllers\Admin\Agenda@status_agenda",
+);
+Route::get(
+    "admin/agenda/kategori/{par1}",
+    "App\Http\Controllers\Admin\Agenda@kategori",
+);
+Route::get(
+    "admin/agenda/jenis_agenda/{par1}",
+    "App\Http\Controllers\Admin\Agenda@jenis_agenda",
+);
+Route::get(
+    "admin/agenda/author/{par1}",
+    "App\Http\Controllers\Admin\Agenda@author",
+);
+Route::get("admin/agenda/tambah", "App\Http\Controllers\Admin\Agenda@tambah");
+Route::get(
+    "admin/agenda/edit/{par1}",
+    "App\Http\Controllers\Admin\Agenda@edit",
+);
+Route::get(
+    "admin/agenda/delete/{par1}",
+    "App\Http\Controllers\Admin\Agenda@delete",
+);
+Route::post(
+    "admin/agenda/tambah_proses",
+    "App\Http\Controllers\Admin\Agenda@tambah_proses",
+);
+Route::post(
+    "admin/agenda/edit_proses",
+    "App\Http\Controllers\Admin\Agenda@edit_proses",
+);
+Route::post("admin/agenda/proses", "App\Http\Controllers\Admin\Agenda@proses");
+Route::get("admin/agenda/add", "App\Http\Controllers\Admin\Agenda@add");
+
+// promosi
+Route::get("admin/promosi", "App\Http\Controllers\Admin\Promosi@index");
+Route::get("admin/promosi/tambah", "App\Http\Controllers\Admin\Promosi@tambah");
+Route::post(
+    "admin/promosi/tambah_proses",
+    "App\Http\Controllers\Admin\Promosi@tambah_proses",
+);
+Route::get(
+    "admin/promosi/edit/{par1}",
+    "App\Http\Controllers\Admin\Promosi@edit",
+);
+Route::post(
+    "admin/promosi/edit_proses",
+    "App\Http\Controllers\Admin\Promosi@edit_proses",
+);
+Route::get(
+    "admin/promosi/delete/{par1}",
+    "App\Http\Controllers\Admin\Promosi@delete",
+);
+
+// Rute untuk mengelola paket iklan
+Route::get("admin/paket-iklan", "App\Http\Controllers\Admin\Paket_iklan@index");
+Route::get(
+    "admin/paket-iklan/create",
+    "App\Http\Controllers\Admin\Paket_iklan@create",
+);
+Route::post(
+    "admin/paket-iklan/store",
+    "App\Http\Controllers\Admin\Paket_iklan@store",
+);
+Route::get(
+    "admin/paket-iklan/edit/{id}",
+    "App\Http\Controllers\Admin\Paket_iklan@edit",
+);
+Route::post(
+    "admin/paket-iklan/update/{id}",
+    "App\Http\Controllers\Admin\Paket_iklan@update",
+);
+Route::get(
+    "admin/paket-iklan/delete/{id}",
+    "App\Http\Controllers\Admin\Paket_iklan@destroy",
+);
+Route::post(
+    "admin/paket-iklan/proses",
+    "App\Http\Controllers\Admin\Paket_iklan@proses",
+);
+
+// RUTE UNTUK TRANSAKSI PAKET IKLAN
+Route::get("admin/transaksi", "App\Http\Controllers\Admin\Transaksi@index");
+Route::get(
+    "admin/transaksi/confirm/{id}",
+    "App\Http\Controllers\Admin\Transaksi@confirm",
+);
+Route::get(
+    "admin/transaksi/reject/{id}",
+    "App\Http\Controllers\Admin\Transaksi@reject",
+);
+Route::get(
+    "admin/transaksi/unverify/{id}",
+    "App\Http\Controllers\Admin\Transaksi@unverify",
+);
+
+// Rute untuk menampilkan halaman profil member
+Route::get(
+    "admin/staff/profil-member",
+    "App\Http\Controllers\Admin\Staff@profilMember",
+);
+
+// Rute untuk memproses update profil member
+Route::post(
+    "admin/staff/update-profil-member",
+    "App\Http\Controllers\Admin\Staff@updateProfilMember",
+);
+
+Route::get("verify-email", "App\Http\Controllers\Admin\User@verifyEmail");
+// Mobile verification route moved to api.php for consistency
+
+// rekening
+Route::get("admin/rekening", "App\Http\Controllers\Admin\Rekening@index");
+Route::get(
+    "admin/rekening/edit/{par1}",
+    "App\Http\Controllers\Admin\Rekening@edit",
+);
+Route::post(
+    "admin/rekening/tambah",
+    "App\Http\Controllers\Admin\Rekening@tambah",
+);
+Route::post(
+    "admin/rekening/proses_edit",
+    "App\Http\Controllers\Admin\Rekening@proses_edit",
+);
+Route::get(
+    "admin/rekening/delete/{par1}",
+    "App\Http\Controllers\Admin\Rekening@delete",
+);
+Route::post(
+    "admin/rekening/proses",
+    "App\Http\Controllers\Admin\Rekening@proses",
+);
+// kategori
+Route::get("admin/kategori", "App\Http\Controllers\Admin\Kategori@index");
+Route::post(
+    "admin/kategori/tambah",
+    "App\Http\Controllers\Admin\Kategori@tambah",
+);
+Route::post("admin/kategori/edit", "App\Http\Controllers\Admin\Kategori@edit");
+Route::get(
+    "admin/kategori/delete/{par1}",
+    "App\Http\Controllers\Admin\Kategori@delete",
+);
+
+Route::get("admin/heading", "App\Http\Controllers\Admin\Heading@index");
+Route::post(
+    "admin/heading/tambah",
+    "App\Http\Controllers\Admin\Heading@tambah",
+);
+Route::post("admin/heading/edit", "App\Http\Controllers\Admin\Heading@edit");
+Route::get(
+    "admin/heading/delete/{par1}",
+    "App\Http\Controllers\Admin\Heading@delete",
+);
+
+Route::get("admin/video", "App\Http\Controllers\Admin\Video@index");
+Route::get("admin/video/edit/{par1}", "App\Http\Controllers\Admin\Video@edit");
+Route::post("admin/video/tambah", "App\Http\Controllers\Admin\Video@tambah");
+Route::post(
+    "admin/video/proses_edit",
+    "App\Http\Controllers\Admin\Video@proses_edit",
+);
+Route::get(
+    "admin/video/delete/{par1}",
+    "App\Http\Controllers\Admin\Video@delete",
+);
+Route::post("admin/video/proses", "App\Http\Controllers\Admin\Video@proses");
+// kategori_download
+Route::get(
+    "admin/kategori_download",
+    "App\Http\Controllers\Admin\Kategori_download@index",
+);
+Route::post(
+    "admin/kategori_download/tambah",
+    "App\Http\Controllers\Admin\Kategori_download@tambah",
+);
+Route::post(
+    "admin/kategori_download/edit",
+    "App\Http\Controllers\Admin\Kategori_download@edit",
+);
+Route::get(
+    "admin/kategori_download/delete/{par1}",
+    "App\Http\Controllers\Admin\Kategori_download@delete",
+);
+// kategori_galeri
+Route::get(
+    "admin/kategori_galeri",
+    "App\Http\Controllers\Admin\Kategori_galeri@index",
+);
+Route::post(
+    "admin/kategori_galeri/tambah",
+    "App\Http\Controllers\Admin\Kategori_galeri@tambah",
+);
+Route::post(
+    "admin/kategori_galeri/edit",
+    "App\Http\Controllers\Admin\Kategori_galeri@edit",
+);
+Route::get(
+    "admin/kategori_galeri/delete/{par1}",
+    "App\Http\Controllers\Admin\Kategori_galeri@delete",
+);
+// kategori_staff
+Route::get(
+    "admin/kategori_staff",
+    "App\Http\Controllers\Admin\Kategori_staff@index",
+);
+Route::post(
+    "admin/kategori_staff/tambah",
+    "App\Http\Controllers\Admin\Kategori_staff@tambah",
+);
+Route::post(
+    "admin/kategori_staff/edit",
+    "App\Http\Controllers\Admin\Kategori_staff@edit",
+);
+Route::get(
+    "admin/kategori_staff/delete/{par1}",
+    "App\Http\Controllers\Admin\Kategori_staff@delete",
+);
+// kategori_property
+Route::get(
+    "admin/kategori_property",
+    "App\Http\Controllers\Admin\Kategori_property@index",
+);
+Route::post(
+    "admin/kategori_property/tambah",
+    "App\Http\Controllers\Admin\Kategori_property@tambah",
+);
+Route::post(
+    "admin/kategori_property/edit",
+    "App\Http\Controllers\Admin\Kategori_property@edit",
+);
+Route::get(
+    "admin/kategori_property/delete/{par1}",
+    "App\Http\Controllers\Admin\Kategori_property@delete",
+);
+// kategori_agenda
+Route::get(
+    "admin/kategori_agenda",
+    "App\Http\Controllers\Admin\Kategori_agenda@index",
+);
+Route::post(
+    "admin/kategori_agenda/tambah",
+    "App\Http\Controllers\Admin\Kategori_agenda@tambah",
+);
+Route::post(
+    "admin/kategori_agenda/edit",
+    "App\Http\Controllers\Admin\Kategori_agenda@edit",
+);
+Route::get(
+    "admin/kategori_agenda/delete/{par1}",
+    "App\Http\Controllers\Admin\Kategori_agenda@delete",
+);
+
+Route::get("admin/galeri", "App\Http\Controllers\Admin\Galeri@index");
+Route::get("admin/galeri/cari", "App\Http\Controllers\Admin\Galeri@cari");
+Route::get(
+    "admin/galeri/status_galeri/{par1}",
+    "App\Http\Controllers\Admin\Galeri@status_galeri",
+);
+Route::get(
+    "admin/galeri/kategori/{par1}",
+    "App\Http\Controllers\Admin\Galeri@kategori",
+);
+Route::get("admin/galeri/tambah", "App\Http\Controllers\Admin\Galeri@tambah");
+Route::get(
+    "admin/galeri/edit/{par1}",
+    "App\Http\Controllers\Admin\Galeri@edit",
+);
+Route::get(
+    "admin/galeri/delete/{par1}",
+    "App\Http\Controllers\Admin\Galeri@delete",
+);
+Route::post(
+    "admin/galeri/tambah_proses",
+    "App\Http\Controllers\Admin\Galeri@tambah_proses",
+);
+Route::post(
+    "admin/galeri/edit_proses",
+    "App\Http\Controllers\Admin\Galeri@edit_proses",
+);
+Route::post("admin/galeri/proses", "App\Http\Controllers\Admin\Galeri@proses");
+// staff
+Route::get("admin/staff", "App\Http\Controllers\Admin\Staff@index");
+Route::get("admin/staff/cari", "App\Http\Controllers\Admin\Staff@cari");
+Route::get(
+    "admin/staff/status_staff/{par1}",
+    "App\Http\Controllers\Admin\Staff@status_staff",
+);
+Route::get(
+    "admin/staff/kategori/{par1}",
+    "App\Http\Controllers\Admin\Staff@kategori",
+);
+Route::get(
+    "admin/staff/detail/{par1}",
+    "App\Http\Controllers\Admin\Staff@detail",
+);
+Route::get("admin/staff/tambah", "App\Http\Controllers\Admin\Staff@tambah");
+Route::get("admin/staff/edit/{par1}", "App\Http\Controllers\Admin\Staff@edit");
+Route::get(
+    "admin/staff/delete/{par1}",
+    "App\Http\Controllers\Admin\Staff@delete",
+);
+Route::post(
+    "admin/staff/tambah_proses",
+    "App\Http\Controllers\Admin\Staff@tambah_proses",
+);
+Route::post(
+    "admin/staff/edit_proses",
+    "App\Http\Controllers\Admin\Staff@edit_proses",
+);
+Route::post("admin/staff/proses", "App\Http\Controllers\Admin\Staff@proses");
+// Property
+Route::get("admin/property", "App\Http\Controllers\Admin\Property@index");
+Route::get("admin/property/cari", "App\Http\Controllers\Admin\Property@cari");
+Route::get(
+    "admin/property/kategori/{par1}",
+    "App\Http\Controllers\Admin\Property@kategori",
+);
+Route::get(
+    "admin/property/detail/{par1}",
+    "App\Http\Controllers\Admin\Property@detail",
+);
+Route::get(
+    "admin/property/tambah",
+    "App\Http\Controllers\Admin\Property@tambah",
+);
+Route::get(
+    "admin/property/edit/{par1}",
+    "App\Http\Controllers\Admin\Property@edit",
+);
+Route::get(
+    "admin/property/delete/{par1}",
+    "App\Http\Controllers\Admin\Property@delete",
+);
+Route::post(
+    "admin/property/tambah_proses",
+    "App\Http\Controllers\Admin\Property@tambah_proses",
+);
+Route::post(
+    "admin/property/edit_proses",
+    "App\Http\Controllers\Admin\Property@edit_proses",
+);
+Route::post(
+    "admin/property/proses",
+    "App\Http\Controllers\Admin\Property@proses",
+);
+
+// proyek
+Route::get("admin/proyek", "App\Http\Controllers\Admin\Proyek@index");
+Route::get("admin/proyek/cari", "App\Http\Controllers\Admin\Proyek@cari");
+Route::get(
+    "admin/proyek/status_proyek/{par1}",
+    "App\Http\Controllers\Admin\Proyek@status_proyek",
+);
+Route::get(
+    "admin/proyek/kategori/{par1}",
+    "App\Http\Controllers\Admin\Proyek@kategori",
+);
+Route::get(
+    "admin/proyek/detail/{par1}",
+    "App\Http\Controllers\Admin\Proyek@detail",
+);
+Route::get("admin/proyek/tambah", "App\Http\Controllers\Admin\Proyek@tambah");
+Route::get(
+    "admin/proyek/edit/{par1}",
+    "App\Http\Controllers\Admin\Proyek@edit",
+);
+Route::get(
+    "admin/proyek/status/{par1}",
+    "App\Http\Controllers\Admin\Proyek@status",
+);
+Route::get(
+    "admin/proyek/delete/{par1}",
+    "App\Http\Controllers\Admin\Proyek@delete",
+);
+Route::post(
+    "admin/proyek/tambah_proses",
+    "App\Http\Controllers\Admin\Proyek@tambah_proses",
+);
+Route::post(
+    "admin/proyek/edit_proses",
+    "App\Http\Controllers\Admin\Proyek@edit_proses",
+);
+Route::post("admin/proyek/proses", "App\Http\Controllers\Admin\Proyek@proses");
+
+Route::get("admin/download", "App\Http\Controllers\Admin\Download@index");
+Route::get("admin/download/cari", "App\Http\Controllers\Admin\Download@cari");
+Route::get(
+    "admin/download/status_download/{par1}",
+    "App\Http\Controllers\Admin\Download@status_download",
+);
+Route::get(
+    "admin/download/kategori/{par1}",
+    "App\Http\Controllers\Admin\Download@kategori",
+);
+Route::get(
+    "admin/download/tambah",
+    "App\Http\Controllers\Admin\Download@tambah",
+);
+Route::get(
+    "admin/download/edit/{par1}",
+    "App\Http\Controllers\Admin\Download@edit",
+);
+Route::get(
+    "admin/download/unduh/{par1}",
+    "App\Http\Controllers\Admin\Download@unduh",
+);
+Route::get(
+    "admin/download/delete/{par1}",
+    "App\Http\Controllers\Admin\Download@delete",
+);
+Route::post(
+    "admin/download/tambah_proses",
+    "App\Http\Controllers\Admin\Download@tambah_proses",
+);
+Route::post(
+    "admin/download/edit_proses",
+    "App\Http\Controllers\Admin\Download@edit_proses",
+);
+Route::post(
+    "admin/download/proses",
+    "App\Http\Controllers\Admin\Download@proses",
+);
+
+// dataset
+Route::get(
+    "admin/dataset/kabupaten/{provinsiId}",
+    "App\Http\Controllers\Admin\Dataset@kabupaten",
+);
+Route::get(
+    "admin/dataset/kecamatan/{kabupatenId}",
+    "App\Http\Controllers\Admin\Dataset@kecamatan",
+);
+
+/* END BACK END*/
+
+=== END OF FILE: web.php ===
+
+
+=== TOTAL FILE DIGABUNGKAN: 4 ===

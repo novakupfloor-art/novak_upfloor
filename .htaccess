@@ -1,0 +1,14 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Jika URL belum mengarah ke /public, arahkan internal ke /public
+    RewriteCond %{REQUEST_URI} !^/public/
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+# Lindungi file/filetype sensitif di root ini
+<FilesMatch "\.(env|json|config|md|lock|gitignore|git|sql|yml|yaml|ini|log|sh)$">
+    Require all denied
+</FilesMatch>
+RedirectMatch 403 ^/(app|bootstrap|config|database|resources|routes|storage|tests|vendor)/(.*)$
+

@@ -1,0 +1,167 @@
+{
+  "jagoanhosting_novak": {
+    "type": "ftp",
+    "host": "encanto.jagoanhosting.com",
+    "port": 21,
+    "username": "waisaka@waisakaproperty.com",
+    "password": "waisaka2025",
+    "proxy": false,
+
+    "upload_on_save": false,
+    "watch": false,
+
+    "submit_git_before_upload": false,
+    "submit_git_msg": "",
+    "build": "",
+
+    "compress": false,
+    "remote_unpacked": false,
+    "delete_remote_compress": false,
+    "delete_local_compress": false,
+    "deleteRemote": false,
+
+    "upload_to_root": true,
+
+    // Upload SEMUA file project ke folder laravel/ di hosting
+    "distPath": [
+      "./"
+    ],
+
+    // OPSI 1: Upload project ke folder laravel/ (RECOMMENDED)
+    // Path ini adalah folder di luar public_html
+    "remotePath": "/home/waisakap/domains/waisakaproperty.com/laravel",
+
+    // File/folder yang TIDAK perlu diupload (hemat waktu & bandwidth)
+    "excludePath": [
+      "node_modules",
+      ".git",
+      ".vscode",
+      ".idea",
+      "tests",
+      ".env.example",
+      "phpunit.xml",
+      "package.json",
+      "package-lock.json",
+      "vite.config.js",
+      "README.md",
+      "DEPLOYMENT_GUIDE.md",
+      "QUICK_START.md",
+      "index_production.php",
+      ".htaccess_opsi2",
+      "env_production_template.txt",
+      "sync_config.jsonc",
+      "public",
+      "storage/logs/*.log",
+      "storage/framework/cache/*",
+      "storage/framework/sessions/*",
+      "storage/framework/views/*"
+    ],
+
+    "downloadPath": "",
+    "downloadExcludePath": [],
+    "default": true
+  },
+
+  "jagoanhosting_public": {
+    "type": "ftp",
+    "host": "encanto.jagoanhosting.com",
+    "port": 21,
+    "username": "waisaka@waisakaproperty.com",
+    "password": "waisaka2025",
+    "proxy": false,
+
+    "upload_on_save": false,
+    "watch": false,
+
+    "submit_git_before_upload": false,
+    "submit_git_msg": "",
+    "build": "",
+
+    "compress": false,
+    "remote_unpacked": false,
+    "delete_remote_compress": false,
+    "delete_local_compress": false,
+    "deleteRemote": false,
+
+    "upload_to_root": true,
+
+    // OPSI 1: Upload HANYA isi folder public/ ke public_html/
+    // Gunakan config ini SETELAH upload project ke /laravel/
+    "distPath": [
+      "./public/"
+    ],
+
+    // Upload isi folder public/ ke public_html/
+    "remotePath": "/home/waisakap/domains/waisakaproperty.com/public_html",
+
+    "excludePath": [
+      ".htaccess",
+      "index.php"
+    ],
+
+    "downloadPath": "",
+    "downloadExcludePath": [],
+    "default": false
+  },
+
+  "jagoanhosting_opsi2": {
+    "type": "ftp",
+    "host": "encanto.jagoanhosting.com",
+    "port": 21,
+    "username": "waisaka@waisakaproperty.com",
+    "password": "waisaka2025",
+    "proxy": false,
+
+    "upload_on_save": false,
+    "watch": false,
+
+    "submit_git_before_upload": false,
+    "submit_git_msg": "",
+    "build": "",
+
+    "compress": false,
+    "remote_unpacked": false,
+    "delete_remote_compress": false,
+    "delete_local_compress": false,
+    "deleteRemote": false,
+
+    "upload_to_root": true,
+
+    // OPSI 2: Upload SEMUA file ke public_html/ (NOT RECOMMENDED)
+    "distPath": [
+      "./"
+    ],
+
+    // Upload ke public_html/ langsung
+    "remotePath": "/home/waisakap/domains/waisakaproperty.com/public_html",
+
+    "excludePath": [
+      "node_modules",
+      ".git",
+      ".vscode",
+      ".idea",
+      "tests",
+      ".env.example",
+      "phpunit.xml",
+      "package.json",
+      "package-lock.json",
+      "vite.config.js",
+      "README.md",
+      "DEPLOYMENT_GUIDE.md",
+      "QUICK_START.md",
+      "index_production.php",
+      ".htaccess_opsi2",
+      "env_production_template.txt",
+      "sync_config.jsonc",
+      "storage/logs/*.log",
+      "storage/framework/cache/*",
+      "storage/framework/sessions/*",
+      "storage/framework/views/*"
+    ],
+
+    "downloadPath": "",
+    "downloadExcludePath": [],
+    "default": false
+  }
+}
+
