@@ -57,9 +57,14 @@ class MobilePropertyController extends Controller
                     'property_db.tanggal as created_at'
                 )
                 ->selectRaw("(CASE WHEN property_db.status = 0 THEN CONCAT('belum ter',property_db.tipe) ELSE CONCAT('sudah ter',property_db.tipe) END) AS nama_status")
-                ->selectRaw("property_db.tanggal as updated_at")
-                ->where('property_db.status', 1)
-                ->orderBy('property_db.tanggal', 'DESC')
+                ->selectRaw("property_db.tanggal as updated_at");
+
+            // Apply filter tipe (jual/sewa) if present
+            if ($request->has('tipe') && !empty($request->tipe)) {
+                $properties->where('property_db.tipe', $request->tipe);
+            }
+
+            $properties = $properties->orderBy('property_db.tanggal', 'DESC')
                 ->offset($offset)
                 ->limit($perPage)
                 ->get();
@@ -220,8 +225,7 @@ class MobilePropertyController extends Controller
                         'property_db.tanggal as created_at',
                         'property_db.tanggal as updated_at'
                     )
-                    ->where('property_db.id_property', $id)
-                    ->where('property_db.status', 1);
+                    ->where('property_db.id_property', $id);
             };
 
             $property = $queryBuilder()->first();
@@ -233,18 +237,7 @@ class MobilePropertyController extends Controller
                 ], 404);
             }
 
-            $needsAiInsights = empty(trim($property->harga_rata ?? '')) ||
-                empty(trim($property->fasilitas_terdekat ?? '')) ||
-                empty(trim($property->peta_map ?? ''));
 
-            if ($needsAiInsights) {
-                try {
-                    $this->generateAiInsights($property->id_property);
-                    $property = $queryBuilder()->first();
-                } catch (\Exception $e) {
-                    Log::warning("AI insights generation failed for public property {$property->id_property}: " . $e->getMessage());
-                }
-            }
 
             try {
                 DB::table('property_db')
@@ -385,71 +378,124 @@ class MobilePropertyController extends Controller
             $perPage = 10;
             $offset = ($page - 1) * $perPage;
 
+            // Build query with JOIN clauses for related tables
             $query = DB::table('property_db')
-                ->where('status', 1);
+                ->join('kategori_property', 'kategori_property.id_kategori_property', '=', 'property_db.id_kategori_property', 'LEFT')
+                ->join('staff', 'staff.id_staff', '=', 'property_db.id_staff', 'LEFT')
+                ->join('provinsi', 'provinsi.id', '=', 'property_db.id_provinsi', 'LEFT')
+                ->join('kabupaten', 'kabupaten.id', '=', 'property_db.id_kabupaten', 'LEFT')
+                ->join('kecamatan', 'kecamatan.id', '=', 'property_db.id_kecamatan', 'LEFT')
+                ->select(
+                    'property_db.*',
+                    'kategori_property.slug_kategori_property',
+                    'kategori_property.nama_kategori_property',
+                    'staff.nama_staff',
+                    'staff.telepon as telepon_staff',
+                    'provinsi.nama as nama_provinsi',
+                    'kabupaten.nama as nama_kabupaten',
+                    'kecamatan.nama as nama_kecamatan',
+                    'property_db.tanggal as created_at'
+                )
+                ->selectRaw("property_db.tanggal as updated_at");
 
+            // Apply filters
             if ($request->has('tipe') && $request->tipe) {
-                $query->where('tipe', $request->tipe);
+                $query->where('property_db.tipe', $request->tipe);
             }
+
+            // Refined Category Filter (Supports ID or Name)
             if ($request->has('id_kategori_property') && $request->id_kategori_property) {
-                $query->where('id_kategori_property', $request->id_kategori_property);
+                $categoryInput = $request->id_kategori_property;
+                if (is_numeric($categoryInput)) {
+                    $query->where('property_db.id_kategori_property', $categoryInput);
+                } else {
+                    // It's a string (e.g. "Rumah", "Apartemen"), match against name or slug
+                    $query->where(function ($q) use ($categoryInput) {
+                        $q->where('kategori_property.nama_kategori_property', 'LIKE', '%' . $categoryInput . '%')
+                            ->orWhere('kategori_property.slug_kategori_property', 'LIKE', '%' . $categoryInput . '%');
+                    });
+                }
             }
-            if ($request->has('id_provinsi') && $request->id_provinsi) {
-                $query->where('id_provinsi', $request->id_provinsi);
+
+            if ($request->has('location') && $request->location != '') {
+                $location = $request->location;
+                $item = explode(", ", $location);
+
+                if (count($item) >= 3) {
+                    $kecamatan = strtolower($item[0]);
+                    $kabupaten = strtolower($item[1]);
+                    $provinsi = strtolower($item[2]);
+
+                    $query->whereRaw(
+                        "(LOWER(kecamatan.nama) LIKE ? AND LOWER(kabupaten.nama) LIKE ? AND LOWER(provinsi.nama) LIKE ?)",
+                        ["%{$kecamatan}%", "%{$kabupaten}%", "%{$provinsi}%"]
+                    );
+                } else if (count($item) == 2) {
+                    $kabupaten = strtolower($item[0]);
+                    $provinsi = strtolower($item[1]);
+
+                    $query->whereRaw(
+                        "(LOWER(kabupaten.nama) LIKE ? AND LOWER(provinsi.nama) LIKE ?)",
+                        ["%{$kabupaten}%", "%{$provinsi}%"]
+                    );
+                } else if (count($item) == 1) {
+                    $searchItem = strtolower($item[0]);
+                    $query->whereRaw(
+                        "(LOWER(kecamatan.nama) LIKE ? OR LOWER(kabupaten.nama) LIKE ? OR LOWER(provinsi.nama) LIKE ?)",
+                        ["%{$searchItem}%", "%{$searchItem}%", "%{$searchItem}%"]
+                    );
+                }
             }
-            if ($request->has('id_kabupaten') && $request->id_kabupaten) {
-                $query->where('id_kabupaten', $request->id_kabupaten);
-            }
-            if ($request->has('id_kecamatan') && $request->id_kecamatan) {
-                $query->where('id_kecamatan', $request->id_kecamatan);
-            }
+
             if ($request->has('min_price') && $request->min_price) {
-                $query->where('harga', '>=', $request->min_price);
+                $query->where('property_db.harga', '>=', $request->min_price);
             }
             // Support both min_price and min_harga
             if ($request->has('min_harga') && $request->min_harga) {
-                $query->where('harga', '>=', $request->min_harga);
+                $query->where('property_db.harga', '>=', $request->min_harga);
             }
             if ($request->has('max_price') && $request->max_price) {
-                $query->where('harga', '<=', $request->max_price);
+                $query->where('property_db.harga', '<=', $request->max_price);
             }
             // Support both max_price and max_harga
             if ($request->has('max_harga') && $request->max_harga) {
-                $query->where('harga', '<=', $request->max_harga);
+                $query->where('property_db.harga', '<=', $request->max_harga);
             }
             // Filter luas bangunan (lb)
             if ($request->has('min_lb') && $request->min_lb) {
-                $query->where('lb', '>=', $request->min_lb);
+                $query->where('property_db.lb', '>=', $request->min_lb);
             }
             if ($request->has('max_lb') && $request->max_lb) {
-                $query->where('lb', '<=', $request->max_lb);
+                $query->where('property_db.lb', '<=', $request->max_lb);
             }
             // Filter luas tanah (lt)
             if ($request->has('min_lt') && $request->min_lt) {
-                $query->where('lt', '>=', $request->min_lt);
+                $query->where('property_db.lt', '>=', $request->min_lt);
             }
             if ($request->has('max_lt') && $request->max_lt) {
-                $query->where('lt', '<=', $request->max_lt);
+                $query->where('property_db.lt', '<=', $request->max_lt);
             }
             if ($request->has('kamar_tidur') && $request->kamar_tidur) {
-                $query->where('kamar_tidur', '>=', $request->kamar_tidur);
+                $query->where('property_db.kamar_tidur', $request->kamar_tidur);
             }
             if ($request->has('kamar_mandi') && $request->kamar_mandi) {
-                $query->where('kamar_mandi', '>=', $request->kamar_mandi);
+                $query->where('property_db.kamar_mandi', $request->kamar_mandi);
             }
+
+            // Refined Keyword Search (Address & Region Only)
             if ($request->has('keywords') && $request->keywords) {
                 $keywords = $request->keywords;
                 $query->where(function ($q) use ($keywords) {
-                    $q->where('nama_property', 'LIKE', '%' . $keywords . '%')
-                        ->orWhere('kode', 'LIKE', '%' . $keywords . '%')
-                        ->orWhere('isi', 'LIKE', '%' . $keywords . '%')
-                        ->orWhere('alamat', 'LIKE', '%' . $keywords . '%');
+                    $q->where('property_db.alamat', 'LIKE', '%' . $keywords . '%')
+                        ->orWhere('provinsi.nama', 'LIKE', '%' . $keywords . '%')
+                        ->orWhere('kabupaten.nama', 'LIKE', '%' . $keywords . '%')
+                        ->orWhere('kecamatan.nama', 'LIKE', '%' . $keywords . '%');
                 });
             }
 
             $total = $query->count();
 
-            $properties = $query->orderBy('id_property', 'DESC')
+            $properties = $query->orderBy('property_db.id_property', 'DESC')
                 ->offset($offset)
                 ->limit($perPage)
                 ->get();
@@ -462,9 +508,8 @@ class MobilePropertyController extends Controller
                 ->get()
                 ->groupBy('id_property');
 
+
             $properties = $properties->map(function ($property) use ($images) {
-                // Transform data inline
-                // Process images
                 $propertyImages = [];
                 if ($images) {
                     $propertyImages = $images->get($property->id_property, collect())->map(function ($img) {
@@ -506,7 +551,7 @@ class MobilePropertyController extends Controller
                     }
                 }
 
-                return [
+                $transformedProperty = [
                     'id_property' => (int) $property->id_property,
                     'kode' => $property->kode ?? '',
                     'nama_property' => $property->nama_property ?? '',
@@ -544,6 +589,15 @@ class MobilePropertyController extends Controller
                     'fasilitas_terdekat' => $property->fasilitas_terdekat ?? null,
                     'peta_map' => $petaMapData
                 ];
+
+                // Add main_image_url for preview
+                if (!empty($transformedProperty['images'])) {
+                    $transformedProperty['main_image_url'] = $transformedProperty['images'][0]['property_images'];
+                } else {
+                    $transformedProperty['main_image_url'] = null;
+                }
+
+                return $transformedProperty;
             });
 
             return response()->json([
@@ -620,7 +674,6 @@ class MobilePropertyController extends Controller
                 )
                 ->selectRaw("(CASE WHEN property_db.status = 0 THEN CONCAT('belum ter',property_db.tipe) ELSE CONCAT('sudah ter',property_db.tipe) END) AS nama_status")
                 ->selectRaw("property_db.tanggal as updated_at")
-                ->where('property_db.status', 1)
                 ->orderBy('property_db.tanggal', 'DESC')
                 ->offset($offset)
                 ->limit($perPage)
@@ -915,13 +968,13 @@ class MobilePropertyController extends Controller
                 'message' => 'Daftar properti berhasil diambil',
                 'data' => $properties,
                 'pagination' => [
-                    'current_page' => (int) $page,
-                    'per_page' => (int) $perPage,
-                    'total' => (int) $total,
-                    'last_page' => (int) ceil($total / $perPage),
-                    'from' => (int) (($page - 1) * $perPage + 1),
-                    'to' => (int) min($page * $perPage, $total)
-                ]
+                        'current_page' => (int) $page,
+                        'per_page' => (int) $perPage,
+                        'total' => (int) $total,
+                        'last_page' => (int) ceil($total / $perPage),
+                        'from' => (int) (($page - 1) * $perPage + 1),
+                        'to' => (int) min($page * $perPage, $total)
+                    ]
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -1249,11 +1302,11 @@ class MobilePropertyController extends Controller
                 'success' => true,
                 'message' => 'Properti berhasil ditambahkan',
                 'data' => [
-                    'property_id' => $propertyId,
-                    'kode' => $request->kode,
-                    'nama_property' => $request->nama_property,
-                    'sisa_kuota_iklan' => $staff->sisa_kuota_iklan - 1
-                ]
+                        'property_id' => $propertyId,
+                        'kode' => $request->kode,
+                        'nama_property' => $request->nama_property,
+                        'sisa_kuota_iklan' => $staff->sisa_kuota_iklan - 1
+                    ]
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
@@ -1430,10 +1483,10 @@ class MobilePropertyController extends Controller
                 'success' => true,
                 'message' => 'Properti berhasil diperbarui',
                 'data' => [
-                    'property_id' => $id,
-                    'kode' => $request->kode,
-                    'nama_property' => $request->nama_property
-                ]
+                        'property_id' => $id,
+                        'kode' => $request->kode,
+                        'nama_property' => $request->nama_property
+                    ]
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -1514,9 +1567,9 @@ class MobilePropertyController extends Controller
                 'success' => true,
                 'message' => 'Properti berhasil dihapus',
                 'data' => [
-                    'property_id' => $id,
-                    'sisa_kuota_iklan' => $staff->sisa_kuota_iklan + 1
-                ]
+                        'property_id' => $id,
+                        'sisa_kuota_iklan' => $staff->sisa_kuota_iklan + 1
+                    ]
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -1619,9 +1672,9 @@ class MobilePropertyController extends Controller
                 'success' => true,
                 'message' => 'Data master berhasil diambil',
                 'data' => [
-                    'kategori_property' => $kategori_property,
-                    'provinsi' => $provinsi
-                ]
+                        'kategori_property' => $kategori_property,
+                        'provinsi' => $provinsi
+                    ]
             ], 200);
         } catch (\Exception $e) {
             return response()->json([
@@ -1718,7 +1771,10 @@ class MobilePropertyController extends Controller
                 $hargaRata = $this->getHargaRata($property, $aiService);
                 if ($hargaRata) {
                     $updateData['harga_rata'] = $hargaRata;
-                    Log::info("AI Harga Rata generated untuk property ID {$id_property}");
+                    Log::info("AI Harga Rata generated untuk property ID {$id_property}", [
+                        'length' => strlen($hargaRata),
+                        'preview' => substr($hargaRata, 0, 100) . '...'
+                    ]);
                     sleep(2); // Prevent Rate Limit
                 }
             }
@@ -1728,7 +1784,10 @@ class MobilePropertyController extends Controller
                 $fasilitasTerdekat = $this->getFasilitasTerdekat($property, $aiService);
                 if ($fasilitasTerdekat) {
                     $updateData['fasilitas_terdekat'] = $fasilitasTerdekat;
-                    Log::info("AI Fasilitas Terdekat generated untuk property ID {$id_property}");
+                    Log::info("AI Fasilitas Terdekat generated untuk property ID {$id_property}", [
+                        'length' => strlen($fasilitasTerdekat),
+                        'preview' => substr($fasilitasTerdekat, 0, 100) . '...'
+                    ]);
                     sleep(2); // Prevent Rate Limit
                 }
             }
@@ -1738,7 +1797,10 @@ class MobilePropertyController extends Controller
                 $petaMap = $this->getPetaMap($property, $aiService);
                 if ($petaMap) {
                     $updateData['peta_map'] = $petaMap;
-                    Log::info("AI Peta Map generated untuk property ID {$id_property}");
+                    Log::info("AI Peta Map generated untuk property ID {$id_property}", [
+                        'length' => strlen($petaMap),
+                        'preview' => substr($petaMap, 0, 100) . '...'
+                    ]);
                 }
             }
 
@@ -1746,11 +1808,18 @@ class MobilePropertyController extends Controller
 
             // Update database jika ada data yang di-generate
             if (!empty($updateData)) {
+                // Log data lengths before saving
+                Log::info("Saving AI Insights to database for property ID {$id_property}", [
+                    'harga_rata_length' => isset($updateData['harga_rata']) ? strlen($updateData['harga_rata']) : 0,
+                    'fasilitas_terdekat_length' => isset($updateData['fasilitas_terdekat']) ? strlen($updateData['fasilitas_terdekat']) : 0,
+                    'peta_map_length' => isset($updateData['peta_map']) ? strlen($updateData['peta_map']) : 0,
+                ]);
+
                 DB::table('property_db')
                     ->where('id_property', $id_property)
                     ->update($updateData);
 
-                Log::info("AI Insights berhasil disimpan untuk property ID {$id_property}", $updateData);
+                Log::info("AI Insights berhasil disimpan untuk property ID {$id_property}");
             }
 
         } catch (\Exception $e) {
@@ -1995,4 +2064,165 @@ PROMPT;
         }
     }
 
+    /**
+     * Debug Endpoint: Force generate and return AI Insights
+     * Digunakan untuk testing fitur AI Insight secara langsung
+     */
+    /**
+     * Debug Endpoint: Force generate and return AI Insights
+     * Digunakan untuk testing fitur AI Insight secara langsung
+     */
+    public function debugAiInsights(Request $request, $id)
+    {
+        try {
+            // 1. Validasi ID
+            if (!$id || $id <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ID properti tidak valid.'
+                ], 400);
+            }
+
+            // 2. Cek Keberadaan Properti (Diagnosa Awal)
+            $exists = DB::table('property_db')->where('id_property', $id)->first();
+
+            if (!$exists) {
+                // Diagnosa: Tampilkan info database dan ID terakhir
+                $dbName = DB::getDatabaseName();
+                $latestIds = DB::table('property_db')
+                    ->orderBy('id_property', 'desc')
+                    ->limit(5)
+                    ->pluck('id_property');
+
+                return response()->json([
+                    'success' => false,
+                    'message' => "Properti dengan ID {$id} TIDAK DITEMUKAN di tabel 'property_db'.",
+                    'diagnostics' => [
+                            'searched_id' => $id,
+                            'connected_database' => $dbName,
+                            'latest_available_ids' => $latestIds,
+                            'note' => 'Pastikan Anda terhubung ke database yang benar dan ID properti valid.'
+                        ]
+                ], 404);
+            }
+
+            // 3. Reset AI fields to force regeneration
+            // Note: Columns might not be nullable, so we use empty strings
+            DB::table('property_db')
+                ->where('id_property', $id)
+                ->update([
+                    'harga_rata' => '',
+                    'fasilitas_terdekat' => '',
+                    'peta_map' => '',
+                    'fasilitas_dekorasi' => ''
+                ]);
+
+            // 4. Force generate AI insights
+            $this->generateAiInsights($id);
+
+            // 5. Fetch updated property data
+            $property = DB::table('property_db')
+                ->where('id_property', $id)
+                ->select(
+                    'id_property',
+                    'nama_property',
+                    'harga_rata',
+                    'fasilitas_terdekat',
+                    'peta_map',
+                    'fasilitas_dekorasi'
+                )
+                ->first();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'AI Insights generated successfully',
+                'data' => $property
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal generate AI insights',
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ], 500);
+        }
+    }
+    /**
+     * Generate AI Insights manually triggered by user
+     */
+    public function generatePropertyAiInsight(Request $request, $id)
+    {
+        try {
+            if (!$id || $id <= 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'ID properti tidak valid.'
+                ], 400);
+            }
+
+            // Check if property exists
+            $property = DB::table('property_db')->where('id_property', $id)->first();
+            if (!$property) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Properti tidak ditemukan'
+                ], 404);
+            }
+
+            // Force generate AI insights
+            $this->generateAiInsights($id);
+
+            // Fetch updated property data
+            $updatedProperty = DB::table('property_db')
+                ->where('id_property', $id)
+                ->first();
+
+            // Parse peta_map
+            $petaMapData = null;
+            if (!empty($updatedProperty->peta_map ?? '')) {
+                $decoded = json_decode($updatedProperty->peta_map, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $petaMapData = [
+                        'latitude' => $decoded['latitude'] ?? null,
+                        'longitude' => $decoded['longitude'] ?? null,
+                        'maps_query' => $decoded['maps_query'] ?? ''
+                    ];
+                } else {
+                    if (preg_match('/q=([-0-9.]+),([-0-9.]+)/', $updatedProperty->peta_map, $matches)) {
+                        $petaMapData = [
+                            'latitude' => $matches[1],
+                            'longitude' => $matches[2],
+                            'maps_query' => ''
+                        ];
+                    } elseif (preg_match('/q=([^&"]+)/', $updatedProperty->peta_map, $matches)) {
+                        $petaMapData = [
+                            'latitude' => null,
+                            'longitude' => null,
+                            'maps_query' => urldecode($matches[1])
+                        ];
+                    }
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'AI Insights berhasil digenerate',
+                'data' => [
+                        'harga_rata' => $updatedProperty->harga_rata,
+                        'fasilitas_terdekat' => $updatedProperty->fasilitas_terdekat,
+                        'fasilitas_dekorasi' => $updatedProperty->fasilitas_dekorasi,
+                        'peta_map' => $petaMapData
+                    ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal generate AI insights',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
+

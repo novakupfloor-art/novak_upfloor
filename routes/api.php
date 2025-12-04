@@ -31,13 +31,18 @@ Route::prefix('v1')->group(function () {
     Route::post('/ai-waisaka/search', [AiWaisakaSearchController::class, 'processAiSearch']);
     Route::get('/ai-waisaka/suggestions', [AiWaisakaSearchController::class, 'getSearchSuggestions']);
     Route::post('/ai-waisaka/market-insight', [AiWaisakaInsightController::class, 'marketInsight']);
+    Route::post('/ai-waisaka/chat', [AiWaisakaSearchController::class, 'chat']);
 
-
+    // Property Routes - IMPORTANT: Specific routes MUST come before {id} wildcard route!
     Route::get('/mobile/properties', [MobilePropertyController::class, 'index']);
     Route::get('/mobile/properties/categories', [MobilePropertyController::class, 'getCategories']);
     Route::get('/mobile/properties/search', [MobilePropertyController::class, 'search']);
-    Route::get('/mobile/properties/{id}', [MobilePropertyController::class, 'show']);
     Route::get('/mobile/properties-all', [MobilePropertyController::class, 'getPropertiesAll']);
+    // AI Insight routes - {id} parameter at the END to avoid conflicts
+    Route::get('/mobile/property/ai-debug/{id}', [MobilePropertyController::class, 'debugAiInsights']);
+    Route::post('/mobile/property/ai/{id}', [MobilePropertyController::class, 'generatePropertyAiInsight']);
+    // Wildcard {id} route MUST be last to avoid catching specific routes above
+    Route::get('/mobile/properties/{id}', [MobilePropertyController::class, 'show']);
 
 
 

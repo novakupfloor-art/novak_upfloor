@@ -8,11 +8,19 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
+use App\Services\WaisakaAiService;
+
 class AiWaisakaSearchController extends Controller
 {
+    protected $aiService;
+
+    public function __construct(WaisakaAiService $aiService)
+    {
+        $this->aiService = $aiService;
+    }
     /**
      * Process AI Waisaka search request
-     * Receives JSON data from frontend and processes it for precise property search
+     * Receives natural language query, parses it with AI, then delegates to standard search
      */
     public function processAiSearch(Request $request)
     {
@@ -20,160 +28,108 @@ class AiWaisakaSearchController extends Controller
             // Validate input
             $validated = $request->validate([
                 'filters' => 'required|array',
-                'filters.listingType' => 'required|string|in:jual,sewa',
-                'filters.location' => 'nullable|string|max:255',
-                'filters.minPrice' => 'nullable|numeric|min:0',
-                'filters.maxPrice' => 'nullable|numeric|min:0',
-                'filters.minLandArea' => 'nullable|numeric|min:0',
-                'filters.maxLandArea' => 'nullable|numeric|min:0',
-                'filters.minBuildingArea' => 'nullable|numeric|min:0',
-                'filters.maxBuildingArea' => 'nullable|numeric|min:0',
-                'filters.bedrooms' => 'nullable|integer|min:0',
-                'filters.bathrooms' => 'nullable|integer|min:0',
-                'filters.propertyType' => 'nullable|string|in:rumah,apartemen,ruko,tanah',
-                'filters.certificate' => 'nullable|string|in:SHM,HGB,Lainnya',
-                // ✅ TAMBAHAN: Field baru untuk validasi
-                'filters.categoryId' => 'nullable|integer|exists:kategori_property,id_kategori_property',
-                'filters.provinceId' => 'nullable|integer|exists:provinsi,id',
-                'filters.districtId' => 'nullable|integer|exists:kabupaten,id',
-                'filters.subDistrictId' => 'nullable|integer|exists:kecamatan,id',
-                'filters.keywords' => 'nullable|string|max:255',
+                'filters.keywords' => 'nullable|string|max:500',
+                'filters.listingType' => 'nullable|string|in:jual,sewa',
             ]);
 
             $filters = $validated['filters'];
+            $keywords = $filters['keywords'] ?? '';
 
-            // ✅ TAMBAHAN: Validasi price range
-            if (!empty($filters['minPrice']) && !empty($filters['maxPrice'])) {
-                if ($filters['minPrice'] > $filters['maxPrice']) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Harga minimum tidak boleh lebih besar dari harga maksimum'
-                    ], 422);
-                }
-            }
-
-            // ✅ TAMBAHAN: Validasi land area range
-            if (!empty($filters['minLandArea']) && !empty($filters['maxLandArea'])) {
-                if ($filters['minLandArea'] > $filters['maxLandArea']) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Luas tanah minimum tidak boleh lebih besar dari luas tanah maksimum'
-                    ], 422);
-                }
-            }
-
-            // ✅ TAMBAHAN: Validasi building area range
-            if (!empty($filters['minBuildingArea']) && !empty($filters['maxBuildingArea'])) {
-                if ($filters['minBuildingArea'] > $filters['maxBuildingArea']) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Luas bangunan minimum tidak boleh lebih besar dari luas bangunan maksimum'
-                    ], 422);
-                }
-            }
-
-            // Log the search request for debugging
             Log::info('AI Waisaka Search Request', [
+                'original_keywords' => $keywords,
                 'filters' => $filters,
-                'ip' => $request->ip(),
-                'user_agent' => $request->userAgent()
+                'ip' => $request->ip()
             ]);
 
-            // Build the search query
-            $query = $this->buildSearchQuery($filters);
+            // ✅ AI PARSING: Convert natural language to structured filters
+            $aiParsedFilters = [];
+            if (!empty($keywords)) {
+                $aiParsedFilters = $this->aiService->parseSearchQuery($keywords);
 
-            // Execute search
-            $properties = $query->get();
-
-            // Get property images
-            $propertyIds = $properties->pluck('id_property')->toArray();
-            $images = collect();
-            
-            if (!empty($propertyIds)) {
-                $images = DB::table('property_img')
-                    ->whereIn('id_property', $propertyIds)
-                    ->orderBy('id_property')
-                    ->orderBy('index_img')
-                    ->get()
-                    ->groupBy('id_property');
+                if ($aiParsedFilters) {
+                    Log::info('Gemini Parsed Intent', [
+                        'original' => $keywords,
+                        'parsed' => $aiParsedFilters
+                    ]);
+                } else {
+                    Log::warning('Gemini failed to parse query, using raw keywords');
+                    $aiParsedFilters = ['keywords' => $keywords];
+                }
             }
 
-            // Transform data inline
-            $transformedProperties = $properties->map(function($property) use ($images) {
-                // Process images
-                $propertyImages = [];
-                if ($images && $images->has($property->id_property)) {
-                    $propertyImages = $images->get($property->id_property)->map(function($img) {
-                        return [
-                            'gambar' => asset('assets/upload/property/' . $img->gambar),
-                            'index_img' => (int) $img->index_img
-                        ];
-                    })->toArray();
-                }
+            // ✅ MAP AI FILTERS TO NEW SEARCH ENDPOINT PARAMETERS
+            // Convert snake_case AI output to match MobilePropertyController::search() parameters
+            $searchParams = [
+                // Basic filters
+                'tipe' => $aiParsedFilters['tipe'] ?? $filters['listingType'] ?? null,
+                // Combine keywords with location if location is single word (no commas)
+                'keywords' => $this->combineKeywords($aiParsedFilters),
 
-                // Set main image URL
-                $mainImageUrl = null;
-                if (!empty($propertyImages)) {
-                    $mainImageUrl = $propertyImages[0]['gambar'];
-                }
+                // Location - convert to string format if needed
+                'location' => $this->formatLocation($aiParsedFilters['lokasi'] ?? null),
 
-                return [
-                    'id_property' => (int) $property->id_property,
-                    'kode' => $property->kode ?? '',
-                    'nama_property' => $property->nama_property ?? '',
-                    'tipe' => $property->tipe ?? '',
-                    'harga' => (int) ($property->harga ?? 0),
-                    'lt' => $property->lt ? (int) $property->lt : null,
-                    'lb' => $property->lb ? (int) $property->lb : null,
-                    'kamar_tidur' => (int) ($property->kamar_tidur ?? 0),
-                    'kamar_mandi' => (int) ($property->kamar_mandi ?? 0),
-                    'alamat' => $property->alamat ?? '',
-                    'view_count' => (int) ($property->view_count ?? 0),
-                    'created_at' => $property->created_at ?? $property->tanggal ?? null,
-                    'updated_at' => $property->updated_at ?? $property->tanggal ?? null,
-                    'nama_kategori_property' => $property->nama_kategori_property ?? '',
-                    'nama_provinsi' => $property->nama_provinsi ?? '',
-                    'nama_kabupaten' => $property->nama_kabupaten ?? '',
-                    'nama_kecamatan' => $property->nama_kecamatan ?? '',
-                    'nama_staff' => $property->nama_staff ?? '',
-                    'images' => $propertyImages,
-                    'main_image_url' => $mainImageUrl,
-                    // Additional fields
-                    'slug_property' => $property->slug_property ?? '',
-                    'surat' => $property->surat ?? 'SHM',
-                    'lantai' => $property->lantai ? (int) $property->lantai : 1,
-                    'jenis_sewa' => $property->jenis_sewa ?? '',
-                    'status' => (int) ($property->status ?? 0),
-                    'isi' => $property->isi ?? '',
-                    'keywords' => $property->keywords ?? '',
-                    'id_kategori_property' => isset($property->id_kategori_property) ? (int) $property->id_kategori_property : null,
-                    'id_provinsi' => isset($property->id_provinsi) ? (int) $property->id_provinsi : null,
-                    'id_kabupaten' => isset($property->id_kabupaten) ? (int) $property->id_kabupaten : null,
-                    'id_kecamatan' => isset($property->id_kecamatan) ? (int) $property->id_kecamatan : null,
-                    // AI Insights dari Waisaka AI
-                    'harga_rata' => $property->harga_rata ?? null,
-                    'fasilitas_terdekat' => $property->fasilitas_terdekat ?? null,
-                    'peta_map' => $property->peta_map ?? null
-                ];
+                // Category - support both name and ID
+                'id_kategori_property' => $this->mapCategory($aiParsedFilters['kategori'] ?? null),
+
+                // Price range
+                'min_harga' => $aiParsedFilters['harga_min'] ?? null,
+                'max_harga' => $aiParsedFilters['harga_max'] ?? null,
+
+                // Land area
+                'min_lt' => $aiParsedFilters['lt_min'] ?? null,
+                'max_lt' => $aiParsedFilters['lt_max'] ?? null,
+
+                // Building area
+                'min_lb' => $aiParsedFilters['lb_min'] ?? null,
+                'max_lb' => $aiParsedFilters['lb_max'] ?? null,
+
+                // Rooms (exact match)
+                'kamar_tidur' => $aiParsedFilters['kamar_tidur'] ?? null,
+                'kamar_mandi' => $aiParsedFilters['kamar_mandi'] ?? null,
+
+                // Certificate
+                'certificates' => $aiParsedFilters['surat'] ?? null,
+
+                // Pagination
+                'page' => 1,
+                'limit' => 20
+            ];
+
+            // Remove null values
+            $searchParams = array_filter($searchParams, function ($value) {
+                return !is_null($value) && $value !== '';
             });
 
-            // Log search results
-            Log::info('AI Waisaka Search Results', [
-                'filters_applied' => $filters,
-                'results_count' => $transformedProperties->count(),
-                'property_ids' => $propertyIds
+            Log::info('AI Search Mapped Parameters', [
+                'ai_filters' => $aiParsedFilters,
+                'search_params' => $searchParams
             ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Pencarian AI Waisaka berhasil',
-                'data' => $transformedProperties,
-                'search_metadata' => [
-                    'filters_applied' => $filters,
-                    'total_results' => $transformedProperties->count(),
+            // ✅ DELEGATE TO MOBILEPROPERTYCONTROLLER::SEARCH()
+            // Create internal request
+            $searchRequest = Request::create(
+                '/api/v1/mobile/properties/search',
+                'GET',
+                $searchParams
+            );
+
+            // Call the search method directly
+            $propertyController = app(MobilePropertyController::class);
+            $searchResponse = $propertyController->search($searchRequest);
+
+            // Get response data
+            $responseData = $searchResponse->getData(true);
+
+            // Add AI metadata to response
+            if ($responseData['success']) {
+                $responseData['ai_metadata'] = [
+                    'original_query' => $keywords,
+                    'parsed_filters' => $aiParsedFilters,
                     'search_timestamp' => now()->toISOString()
-                ]
-            ], 200);
+                ];
+            }
+
+            return response()->json($responseData, $searchResponse->status());
 
         } catch (\Illuminate\Validation\ValidationException $e) {
             return response()->json([
@@ -197,7 +153,107 @@ class AiWaisakaSearchController extends Controller
     }
 
     /**
+     * Format location string for search
+     */
+    private function formatLocation(?string $location): ?string
+    {
+        if (empty($location)) {
+            return null;
+        }
+
+
+        // Only use location filter if it contains commas (proper format)
+        // Single word locations will be handled by keywords
+        return (strpos($location, ',') !== false) ? $location : null;
+    }
+
+    /**
+     * Combine keywords with location if location is single word
+     */
+    private function combineKeywords(array $aiFilters): ?string
+    {
+        $keywords = $aiFilters['keywords'] ?? '';
+        $location = $aiFilters['lokasi'] ?? '';
+
+        // If location doesn't have commas, add it to keywords
+        if (!empty($location) && strpos($location, ',') === false) {
+            $keywords = trim($keywords . ' ' . $location);
+        }
+
+        return !empty($keywords) ? $keywords : null;
+    }
+
+    /**
+     * Map category name to appropriate format
+     */
+    private function mapCategory(?string $category): ?string
+    {
+        if (empty($category)) {
+            return null;
+        }
+
+        // Map common category names
+        $categoryMap = [
+            'rumah' => 'Rumah',
+            'apartemen' => 'Apartemen',
+            'ruko' => 'Ruko',
+            'tanah' => 'Tanah',
+            'villa' => 'Villa',
+            'gudang' => 'Gudang',
+            'kantor' => 'Kantor',
+            'kost' => 'Kost'
+        ];
+
+        $lowerCategory = strtolower($category);
+        return $categoryMap[$lowerCategory] ?? $category;
+    }
+
+    /**
+     * Process General AI Chat
+     */
+    public function chat(Request $request)
+    {
+        try {
+            $request->validate([
+                'message' => 'required|string|max:1000',
+            ]);
+
+            $message = $request->input('message');
+
+            // Call AI Service for general chat
+            $response = $this->aiService->generalChat($message);
+
+            if ($response) {
+                return response()->json([
+                    'success' => true,
+                    'data' => [
+                        'message' => $response,
+                        'timestamp' => now()->toISOString()
+                    ]
+                ], 200);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'AI tidak dapat memberikan respons saat ini.'
+                ], 500);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('AI Chat Error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan pada server'
+            ], 500);
+        }
+    }
+
+    /**
      * Build search query based on filters
+     * Uses snake_case keys matching Database Columns
      */
     private function buildSearchQuery(array $filters)
     {
@@ -209,6 +265,7 @@ class AiWaisakaSearchController extends Controller
             ->join('kecamatan', 'kecamatan.id', '=', 'property_db.id_kecamatan', 'LEFT')
             ->select(
                 'property_db.*',
+                'kategori_property.slug_kategori_property',
                 'kategori_property.nama_kategori_property',
                 'staff.nama_staff',
                 'provinsi.nama as nama_provinsi',
@@ -216,100 +273,101 @@ class AiWaisakaSearchController extends Controller
                 'kecamatan.nama as nama_kecamatan',
                 'property_db.tanggal as created_at'
             )
-            ->where('property_db.status', 1) // Only active properties
+            ->selectRaw("(CASE WHEN property_db.status = 0 THEN CONCAT('belum ter',property_db.tipe) ELSE CONCAT('sudah ter',property_db.tipe) END) AS nama_status")
             ->orderBy('property_db.tanggal', 'DESC');
 
-        // Apply filters
-        if (!empty($filters['listingType'])) {
-            $query->where('property_db.tipe', $filters['listingType']);
+        // Apply filters (using snake_case keys)
+
+        if (!empty($filters['tipe'])) {
+            $query->where('property_db.tipe', $filters['tipe']);
         }
 
-        // ✅ PERBAIKAN: Location search yang lebih komprehensif
-        if (!empty($filters['location'])) {
-            $location = $filters['location'];
-            $query->where(function($q) use ($location) {
+        if (!empty($filters['lokasi'])) {
+            $location = $filters['lokasi'];
+            $query->where(function ($q) use ($location) {
                 $q->where('provinsi.nama', 'LIKE', '%' . $location . '%')
-                  ->orWhere('kabupaten.nama', 'LIKE', '%' . $location . '%')
-                  ->orWhere('kecamatan.nama', 'LIKE', '%' . $location . '%')
-                  ->orWhere('property_db.alamat', 'LIKE', '%' . $location . '%')
-                  ->orWhere('property_db.nama_property', 'LIKE', '%' . $location . '%') // ✅ TAMBAHAN
-                  ->orWhere('property_db.kode', 'LIKE', '%' . $location . '%') // ✅ TAMBAHAN
-                  ->orWhere('property_db.isi', 'LIKE', '%' . $location . '%'); // ✅ TAMBAHAN
+                    ->orWhere('kabupaten.nama', 'LIKE', '%' . $location . '%')
+                    ->orWhere('kecamatan.nama', 'LIKE', '%' . $location . '%')
+                    ->orWhere('property_db.alamat', 'LIKE', '%' . $location . '%')
+                    ->orWhere('property_db.nama_property', 'LIKE', '%' . $location . '%')
+                    ->orWhere('property_db.kode', 'LIKE', '%' . $location . '%')
+                    ->orWhere('property_db.isi', 'LIKE', '%' . $location . '%');
             });
         }
 
-        if (!empty($filters['minPrice'])) {
-            $query->where('property_db.harga', '>=', $filters['minPrice']);
+        if (!empty($filters['harga_min'])) {
+            $query->where('property_db.harga', '>=', $filters['harga_min']);
         }
 
-        if (!empty($filters['maxPrice'])) {
-            $query->where('property_db.harga', '<=', $filters['maxPrice']);
+        if (!empty($filters['harga_max'])) {
+            $query->where('property_db.harga', '<=', $filters['harga_max']);
         }
 
-        if (!empty($filters['minLandArea'])) {
-            $query->where('property_db.lt', '>=', $filters['minLandArea']);
+        if (!empty($filters['lt_min'])) {
+            $query->where('property_db.lt', '>=', $filters['lt_min']);
         }
 
-        if (!empty($filters['maxLandArea'])) {
-            $query->where('property_db.lt', '<=', $filters['maxLandArea']);
+        if (!empty($filters['lt_max'])) {
+            $query->where('property_db.lt', '<=', $filters['lt_max']);
         }
 
-        if (!empty($filters['minBuildingArea'])) {
-            $query->where('property_db.lb', '>=', $filters['minBuildingArea']);
+        if (!empty($filters['lb_min'])) {
+            $query->where('property_db.lb', '>=', $filters['lb_min']);
         }
 
-        if (!empty($filters['maxBuildingArea'])) {
-            $query->where('property_db.lb', '<=', $filters['maxBuildingArea']);
+        if (!empty($filters['lb_max'])) {
+            $query->where('property_db.lb', '<=', $filters['lb_max']);
         }
 
-        if (!empty($filters['bedrooms'])) {
-            $query->where('property_db.kamar_tidur', '>=', $filters['bedrooms']);
+        if (!empty($filters['kamar_tidur'])) {
+            $query->where('property_db.kamar_tidur', '>=', $filters['kamar_tidur']);
         }
 
-        if (!empty($filters['bathrooms'])) {
-            $query->where('property_db.kamar_mandi', '>=', $filters['bathrooms']);
+        if (!empty($filters['kamar_mandi'])) {
+            $query->where('property_db.kamar_mandi', '>=', $filters['kamar_mandi']);
         }
 
-        if (!empty($filters['propertyType'])) {
-            $propertyType = $filters['propertyType'];
-            $query->where('kategori_property.nama_kategori_property', 'LIKE', '%' . $propertyType . '%');
+        if (!empty($filters['kategori'])) {
+            $kategori = $filters['kategori'];
+            $query->where('kategori_property.nama_kategori_property', 'LIKE', '%' . $kategori . '%');
         }
 
-        if (!empty($filters['certificate'])) {
-            $query->where('property_db.surat', $filters['certificate']);
+        if (!empty($filters['surat'])) {
+            $query->where('property_db.surat', $filters['surat']);
         }
 
-        // ✅ TAMBAHAN: Filter berdasarkan categoryId
-        if (!empty($filters['categoryId'])) {
-            $query->where('property_db.id_kategori_property', $filters['categoryId']);
+        if (!empty($filters['id_kategori_property'])) {
+            $query->where('property_db.id_kategori_property', $filters['id_kategori_property']);
         }
 
-        // ✅ TAMBAHAN: Filter berdasarkan provinceId
-        if (!empty($filters['provinceId'])) {
-            $query->where('property_db.id_provinsi', $filters['provinceId']);
+        if (!empty($filters['id_provinsi'])) {
+            $query->where('property_db.id_provinsi', $filters['id_provinsi']);
         }
 
-        // ✅ TAMBAHAN: Filter berdasarkan districtId
-        if (!empty($filters['districtId'])) {
-            $query->where('property_db.id_kabupaten', $filters['districtId']);
+        if (!empty($filters['id_kabupaten'])) {
+            $query->where('property_db.id_kabupaten', $filters['id_kabupaten']);
         }
 
-        // ✅ TAMBAHAN: Filter berdasarkan subDistrictId
-        if (!empty($filters['subDistrictId'])) {
-            $query->where('property_db.id_kecamatan', $filters['subDistrictId']);
+        if (!empty($filters['id_kecamatan'])) {
+            $query->where('property_db.id_kecamatan', $filters['id_kecamatan']);
         }
 
-        // ✅ TAMBAHAN: Filter berdasarkan keywords untuk pencarian yang lebih luas
         if (!empty($filters['keywords'])) {
             $keywords = $filters['keywords'];
-            $query->where(function($q) use ($keywords) {
+            $query->where(function ($q) use ($keywords) {
                 $q->where('property_db.nama_property', 'LIKE', '%' . $keywords . '%')
-                  ->orWhere('property_db.kode', 'LIKE', '%' . $keywords . '%')
-                  ->orWhere('property_db.isi', 'LIKE', '%' . $keywords . '%')
-                  ->orWhere('property_db.alamat', 'LIKE', '%' . $keywords . '%')
-                  ->orWhere('property_db.keywords', 'LIKE', '%' . $keywords . '%');
+                    ->orWhere('property_db.kode', 'LIKE', '%' . $keywords . '%')
+                    ->orWhere('property_db.isi', 'LIKE', '%' . $keywords . '%')
+                    ->orWhere('property_db.alamat', 'LIKE', '%' . $keywords . '%')
+                    ->orWhere('property_db.keywords', 'LIKE', '%' . $keywords . '%');
             });
         }
+
+        // Log the generated SQL for debugging
+        Log::info('AI Search SQL', [
+            'sql' => $query->toSql(),
+            'bindings' => $query->getBindings()
+        ]);
 
         return $query;
     }
@@ -321,7 +379,7 @@ class AiWaisakaSearchController extends Controller
     {
         try {
             $query = $request->query('q', '');
-            
+
             if (strlen($query) < 2) {
                 return response()->json([
                     'success' => true,
@@ -335,17 +393,16 @@ class AiWaisakaSearchController extends Controller
                 ->join('kabupaten', 'kabupaten.id', '=', 'property_db.id_kabupaten', 'LEFT')
                 ->join('kecamatan', 'kecamatan.id', '=', 'property_db.id_kecamatan', 'LEFT')
                 ->select('provinsi.nama as provinsi', 'kabupaten.nama as kabupaten', 'kecamatan.nama as kecamatan')
-                ->where('property_db.status', 1)
-                ->where(function($q) use ($query) {
+                ->where(function ($q) use ($query) {
                     $q->where('provinsi.nama', 'LIKE', '%' . $query . '%')
-                      ->orWhere('kabupaten.nama', 'LIKE', '%' . $query . '%')
-                      ->orWhere('kecamatan.nama', 'LIKE', '%' . $query . '%');
+                        ->orWhere('kabupaten.nama', 'LIKE', '%' . $query . '%')
+                        ->orWhere('kecamatan.nama', 'LIKE', '%' . $query . '%');
                 })
                 ->distinct()
                 ->limit(10)
                 ->get();
 
-            $suggestions = $locations->map(function($location) {
+            $suggestions = $locations->map(function ($location) {
                 return $location->kabupaten ?: $location->provinsi;
             })->unique()->values();
 

@@ -85,7 +85,6 @@ class AiWaisakaInsightController extends Controller
                 'kabupaten.nama as kabupaten',
                 'kategori_property.nama_kategori_property'
             )
-            ->where('property_db.status', 1)
             ->where('property_db.tipe', $listingType)
             ->where(function($q) use ($location) {
                 $q->where('provinsi.nama', 'LIKE', '%' . $location . '%')

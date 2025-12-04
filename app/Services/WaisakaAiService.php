@@ -273,6 +273,68 @@ PROMPT;
         return $this->generateContent($prompt);
     }
 
+    public function parseSearchQuery(string $query): ?array
+    {
+        $prompt = <<<PROMPT
+You are an AI Property Search Assistant. Your task is to extract search filters from a natural language query into a structured JSON format.
+
+USER QUERY: "{$query}"
+
+EXTRACT THESE FILTERS (if mentioned or implied):
+- keywords: (string) The remaining search terms after extracting specific filters.
+- harga_min: (number) Minimum price in IDR.
+- harga_max: (number) Maximum price in IDR.
+- lokasi: (string) Specific location name (city, district, area).
+- kamar_tidur: (int) Number of bedrooms.
+- kamar_mandi: (int) Number of bathrooms.
+- lt_min: (int) Minimum land area (m2).
+- lt_max: (int) Maximum land area (m2).
+- lb_min: (int) Minimum building area (m2).
+- lb_max: (int) Maximum building area (m2).
+- kategori: (string) One of: "rumah", "apartemen", "ruko", "tanah".
+- tipe: (string) One of: "jual", "sewa".
+- surat: (string) Certificate type if mentioned (SHM, HGB).
+
+RULES:
+1. Convert all prices to full numbers (e.g., "3 Milyar" -> 3000000000).
+2. If listing type is not specified, guess based on context (default to null if unsure).
+3. "Keywords" should contain any descriptive terms not covered by other filters (e.g., "hook", "mewah", "dekat tol").
+4. Return ONLY valid JSON. No markdown formatting.
+
+EXAMPLE OUTPUT:
+{
+  "harga_max": 3000000000,
+  "lokasi": "Kota Wisata",
+  "kategori": "rumah",
+  "tipe": "jual",
+  "keywords": "siap huni"
+}
+PROMPT;
+
+        $raw = $this->generateContent($prompt);
+        return $this->decodeJson($raw);
+    }
+
+    public function generalChat(string $query): ?string
+    {
+        $prompt = <<<PROMPT
+You are a helpful and professional AI Assistant for "Waisaka Property", a property marketplace application.
+Your goal is to assist users with questions related to property, mortgages (KPR), investment, or general advice about buying/renting homes.
+
+USER QUESTION: "{$query}"
+
+INSTRUCTIONS:
+1. Answer politely and professionally in Indonesian.
+2. Keep the answer concise (max 3-4 paragraphs).
+3. If the user asks about specific listings, explain that you can't search for specific ads right now, but you can give general advice.
+4. Do NOT try to output JSON. Just plain text.
+
+ANSWER:
+PROMPT;
+
+        return $this->generateContent($prompt);
+    }
+
     protected function generateContent(string $prompt): ?string
     {
         if (empty($this->apiKey)) {
